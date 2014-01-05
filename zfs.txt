@@ -1,0 +1,113 @@
+### ### ### PLITC ### ### ###
+#
+# --- booting FreeBSD LiveCD - choose Live Mode
+
+# --- change keymap
+
+sysinstall -> Keymap -> German ISO
+
+# --- delete old partitions
+
+gpart delete -i 3 ada0
+gpart delete -i 2 ada0
+gpart delete -i 1 ada0
+gpart destroy ada0
+
+# --- create zfs partitions
+
+gpart create -s gpt ada0
+gpart add -s 64K -t freebsd-boot ada0
+gpart add -s 4G -t freebsd-swap -l swap0 ada0
+gpart add -t freebsd-zfs -l disk0 ada0
+
+gpart bootcode -b /boot/pmbr -p /boot/gptzfsboot -i 1 ada0
+
+kldload /boot/kernel/opensolaris.ko
+kldload /boot/kernel/zfs.ko
+
+mkdir /tmp/zroot
+zpool create zroot /dev/gpt/disk0
+
+zpool set cachefile=/tmp/zpool.cache zroot
+
+zfs set mountpoint=/tmp/zroot zroot
+
+zfs mount -a
+
+zpool set bootfs=zroot zroot
+
+# --- create zfs datasets
+
+zfs set checksum=fletcher4 zroot
+zfs create -o compression=on -o exec=on -o setuid=off zroot/tmp
+chmod 1777 /tmp/zroot/tmp
+zfs create zroot/usr
+zfs create zroot/usr/home
+cd /tmp/zroot ; ln -s /usr/home home
+zfs create -o compression=lz4 -o setuid=off zroot/usr/ports
+zfs create -o compression=off -o exec=off -o setuid=off zroot/usr/ports/distfiles
+zfs create -o compression=off -o exec=off -o setuid=off zroot/usr/ports/packages
+zfs create -o compression=lz4 -o exec=off -o setuid=off zroot/usr/src
+zfs create zroot/var
+zfs create -o compression=lz4 -o exec=off -o setuid=off zroot/var/crash
+zfs create -o exec=off -o setuid=off zroot/var/db
+zfs create -o compression=lz4 -o exec=on -o setuid=off zroot/var/db/pkg
+zfs create -o exec=off -o setuid=off zroot/var/empty
+zfs create -o compression=lz4 -o exec=off -o setuid=off zroot/var/log
+zfs create -o compression=lz4 -o exec=off -o setuid=off zroot/var/mail
+zfs create -o exec=off -o setuid=off zroot/var/run
+zfs create -o compression=lz4 -o exec=on -o setuid=off zroot/var/tmp
+chmod 1777 /tmp/zroot/var/tmp
+
+# --- system install
+
+cd /tmp/zroot
+/bin/sh
+for i in $(ls /usr/freebsd-dist/*.txz); do tar xf $i ; done
+zfs set readonly=on zroot/var/empty
+
+# --- system config
+
+chroot /tmp/zroot
+
+echo 'zfs_enable="YES"' > /etc/rc.conf
+echo 'hostname="beastie.mydomain.local"' >> /etc/rc.conf
+echo 'ifconfig_bge0="DHCP"' >> /etc/rc.conf
+
+echo 'zfs_load="YES"' > /boot/loader.conf
+echo 'vfs.root.mountfrom="zfs:zroot"' >> /boot/loader.conf
+
+passwd
+
+cd /etc/mail
+make aliases
+exit
+
+exit
+
+# --- set fstab
+
+cat << EOF > /tmp/zroot/etc/fstab
+### ### ### PLITC ### ### ###
+# Device         Mountpoint   FStype   Options   Dump   Pass#
+/dev/gpt/swap0   none         swap     sw        0       0
+### ### ### PLITC ### ### ###
+EOF
+
+# --- final commands
+
+cd /
+cp /tmp/zpool.cache /tmp/zroot/boot/zfs
+zfs unmount -a
+zfs set mountpoint=legacy zroot 
+zfs set mountpoint=/tmp zroot/tmp
+zfs set mountpoint=/usr zroot/usr
+zfs set mountpoint=/var zroot/var
+
+reboot
+
+### --- --- --- thats it --- --- --- ###
+
+#
+### ### ### PLITC ### ### ###
+# EOF
